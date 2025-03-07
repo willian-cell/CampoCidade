@@ -24,6 +24,7 @@ if not os.path.exists(DEFAULT_USER_IMG):
 
 # ========================== FUNÇÕES DO BANCO DE DADOS ==========================
 
+
 DATABASE = "database.db"
 UPLOAD_FOLDER = "uploads"
 
@@ -188,7 +189,7 @@ def tela_usuario():
 
     # Exibir imagem da foto de perfil responsivamente
     try:
-        st.image(foto_perfil, caption="Foto de Perfil", use_container_width=True)
+        st.image(foto_perfil, caption="Foto de Perfil", width=300)
     except Exception as e:
         st.warning(f"Erro ao carregar imagem, tente salvar alguma imagem: {e}")
         st.image("https://via.placeholder.com/150", caption="Imagem temporária")
@@ -233,7 +234,6 @@ def tela_usuario():
     if not hortas:
         st.warning(" 🌱  Ainda não cadastrou sua horta? ")
         st.warning(" 🌱 VÁ ATÉ A BARRA DE NAVEGAÇAO AO LADO!")
-        st.warning(" 🌱 CADASTRE AGORA!")
 
     else:
         st.subheader("🌾 Minhas Hortas")
@@ -282,6 +282,10 @@ def tela_usuario():
 
             
 def editar_horta(horta_id):
+    """ Função para editar uma horta existente """
+    # Armazena o ID da horta na sessão para rastreamento correto
+    st.session_state["horta_em_edicao"] = horta_id
+    
     conn = get_db_connection()
     horta = conn.execute("SELECT * FROM hortas WHERE horta_id = ?", (horta_id,)).fetchone()
     conn.close()
@@ -292,100 +296,59 @@ def editar_horta(horta_id):
 
     st.subheader(f"✏️ Editar Horta: {horta['nome_horta']}")
 
+    # Campos do formulário
     nome_horta = st.text_input("Nome da Horta", value=horta["nome_horta"])
     especie = st.text_input("Espécie Plantada", value=horta["especie"])
     dias_colheita = st.number_input("Dias para Colheita", min_value=1, step=1, value=horta["dias_colheita"])
     endereco = st.text_input("Endereço da Horta", value=horta["endereco"])
 
+    # Manipulação da foto
     foto = st.file_uploader("Atualize a foto da horta", type=["jpg", "png", "jpeg"])
     file_path = horta["foto"]
-
+    
     if foto:
         file_path = salvar_foto(foto, f"horta_{horta_id}.jpg")
 
-    if st.button("💾 Salvar Alterações"):
+    # Botões de ação
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Salvar Alterações"):
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE hortas 
+                SET nome_horta = ?, especie = ?, dias_colheita = ?, endereco = ?, foto = ?
+                WHERE horta_id = ?;
+            ''', (nome_horta, especie, dias_colheita, endereco, file_path, horta_id))
+            conn.commit()
+            conn.close()
+
+            st.success("Horta atualizada com sucesso!")
+            
+            # Remover estado de edição e recarregar a página
+            del st.session_state["horta_em_edicao"]
+            st.rerun()
+    
+    with col2:
+        if st.button("❌ Cancelar"):
+            del st.session_state["horta_em_edicao"]
+            st.rerun()
+
+    # Postar no Feed
+    if st.button("📢 Postar no Feed"):
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE hortas 
-            SET nome_horta = ?, especie = ?, dias_colheita = ?, endereco = ?, foto = ?
-            WHERE horta_id = ?;
-        ''', (nome_horta, especie, dias_colheita, endereco, file_path, horta_id))
-        conn.commit()
-        conn.close()
-
-        st.success("Horta atualizada com sucesso!")
-
-        # Limpar estado após salvar
-        del st.session_state["horta_em_edicao"]
-        st.rerun()
-
-    if st.button("❌ Cancelar"):
-        del st.session_state["horta_em_edicao"]
-        st.rerun()
-
-
-    if st.button("Postar no Feed"):
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        for horta in hortas:
-            cursor.execute("INSERT INTO feed_hortas (horta_id, usuario_id, foto, descricao, data_postagem) VALUES (?, ?, ?, ?, ?)",
-                           (horta["horta_id"], st.session_state["user"]["user_id"], horta["foto"], f"Horta de {st.session_state['user']['nome']}", datetime.now()))
+        cursor.execute("""
+            INSERT INTO feed_hortas (horta_id, usuario_id, foto, descricao, data_postagem)
+            VALUES (?, ?, ?, ?, ?)
+        """, (horta_id, st.session_state["user"]["user_id"], file_path, f"Horta de {st.session_state['user']['nome']}", datetime.now()))
         conn.commit()
         conn.close()
         st.success("Horta postada no feed!")
 
 
-
-def painel_administrador():
-    st.subheader("🛠️ Painel do Administrador")
-
-
-    # ================== LISTAGEM DE HORTAS CADASTRADAS ==================
-    st.subheader("📋 Hortas Cadastradas")
-
-    conn = get_db_connection()
-    hortas = conn.execute("SELECT * FROM hortas").fetchall()
-    conn.close()
-
-    if not hortas:
-        st.info("📢 Nenhuma horta cadastrada ainda.")
-        return
-
-    for horta in hortas:
-        with st.container():
-            st.write(f"**🌿 Horta:** {horta['nome_horta']}")
-            st.write(f"📌 **Espécie:** {horta['especie']}")
-            st.write(f"⏳ **Dias para Colheita:** {horta['dias_colheita']} dias")
-            st.write(f"👨‍🌾 **Produtor:** {horta['contato']} - 📧 {horta['email']}")
-
-            foto_horta = horta["foto"]
-            if not foto_horta or not os.path.exists(foto_horta):
-                foto_horta = "imagens/default-horta.jpg"
-
-            try:
-                st.image(foto_horta, width=300)
-            except Exception as e:
-                st.warning(f"Erro ao carregar imagem: {e}")
-                st.image("https://via.placeholder.com/300", width=300)
-
-            # Criar colunas para botões
-            col1, col2 = st.columns(2)
-
-            with col1:
-                if st.button("🗑️ Excluir", key=f"del_{horta['horta_id']}"):
-                    st.session_state["confirmar_exclusao"] = horta["horta_id"]
-                    st.rerun()
-
-            with col2:
-                if st.button("✏️ Editar", key=f"edit_{horta['horta_id']}"):
-                    st.session_state["horta_em_edicao"] = horta["horta_id"]
-                    st.rerun()
-
-            st.write("---")  # Separador entre hortas
-
-
 # ========================== EXCLUIR HORTA ==========================
+
 
 def excluir_horta(horta_id):
     conn = get_db_connection()
@@ -395,6 +358,7 @@ def excluir_horta(horta_id):
     conn.close()
     st.success("✅ Horta excluída com sucesso!")
     st.rerun()
+
 
 # ========================== ATUALIZAR HORTA ==========================
 
@@ -448,6 +412,55 @@ def atualizar_horta(horta_id):
             del st.session_state["horta_em_edicao"]
             st.rerun()
 
+
+def painel_administrador():
+    st.subheader("🛠️ Painel do Administrador")
+
+
+    # ================== LISTAGEM DE HORTAS CADASTRADAS ==================
+    st.subheader("📋 Hortas Cadastradas")
+
+    conn = get_db_connection()
+    hortas = conn.execute("SELECT * FROM hortas").fetchall()
+    conn.close()
+
+    if not hortas:
+        st.info("📢 Nenhuma horta cadastrada ainda.")
+        return
+
+    for horta in hortas:
+        with st.container():
+            st.write(f"**🌿 Horta:** {horta['nome_horta']}")
+            st.write(f"📌 **Espécie:** {horta['especie']}")
+            st.write(f"⏳ **Dias para Colheita:** {horta['dias_colheita']} dias")
+            st.write(f"👨‍🌾 **Produtor:** {horta['contato']} - 📧 {horta['email']}")
+
+            foto_horta = horta["foto"]
+            if not foto_horta or not os.path.exists(foto_horta):
+                foto_horta = "imagens/default-horta.jpg"
+
+            try:
+                st.image(foto_horta, width=300)
+            except Exception as e:
+                st.warning(f"Erro ao carregar imagem: {e}")
+                st.image("https://via.placeholder.com/300", width=300)
+
+            # Criar colunas para botões
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("🗑️ Excluir", key=f"del_{horta['horta_id']}"):
+                    st.session_state["confirmar_exclusao"] = horta["horta_id"]
+                    excluir_horta()
+                    st.rerun()
+
+            with col2:
+                if st.button("✏️ Atualizar", key=f"edit_{horta['horta_id']}"):
+                    st.session_state["horta_em_edicao"] = horta["horta_id"]
+                    atualizar_horta(horta["horta_id"])
+
+
+            st.write("---")  # Separador entre hortas
 
 
 # ========================== SISTEMA DE NAVEGAÇÃO ==========================
